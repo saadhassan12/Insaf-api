@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Socket.IO Chat Tester</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: #25D366;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            padding: 20px;
+        }
+        .section {
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+        }
+        .section h3 {
+            margin-bottom: 15px;
+            color: #333;
+            border-bottom: 2px solid #25D366;
+            padding-bottom: 10px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #555;
+            font-weight: 500;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        button {
+            background: #25D366;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            width: 100%;
+            margin-top: 10px;
+        }
+        button:hover {
+            background: #128C7E;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            font-weight: 500;
+        }
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .log {
+            background: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+        .log-entry {
+            margin-bottom: 8px;
+            padding: 8px;
+            border-radius: 3px;
+            border-left: 3px solid #25D366;
+            background: white;
+        }
+        .log-entry.error {
+            border-left-color: #dc3545;
+            background: #fff5f5;
+        }
+        .log-entry.success {
+            border-left-color: #28a745;
+            background: #f0fff4;
+        }
+        .timestamp {
+            color: #666;
+            font-size: 11px;
+        }
+        .online-users {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .user-badge {
+            background: #e3f2fd;
+            padding: 5px 12px;
+            border-radius: 15px;
+            font-size: 12px;
+            color: #1976d2;
+            border: 1px solid #bbdefb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔌 Socket.IO Chat System Tester</h1>
+            <p>Test your lawyer group chat system in real-time</p>
+        </div>
+
+        <div class="content">
+            <!-- Connection Section -->
+            <div class="section">
+                <h3>🌐 Connection</h3>
+                <div id="connectionStatus" class="status disconnected">
+                    Disconnected
+                </div>
+                <div class="form-group">
+                    <label>Socket.IO Server URL</label>
+                    <input type="text" id="socketUrl" value="http://localhost:3000">
+                </div>
+                <div class="form-group">
+                    <label>User ID</label>
+                    <input type="number" id="userId" value="1">
+                </div>
+                <div class="form-group">
+                    <label>User Name</label>
+                    <input type="text" id="userName" value="Test User">
+                </div>
+                <button onclick="connectSocket()">Connect</button>
+                <button onclick="disconnectSocket()">Disconnect</button>
+            </div>
+
+            <!-- Group Management -->
+            <div class="section">
+                <h3>👥 Group Management</h3>
+                <div class="form-group">
+                    <label>Group ID</label>
+                    <input type="number" id="groupId" value="1">
+                </div>
+                <button onclick="joinGroup()">Join Group</button>
+                <button onclick="leaveGroup()">Leave Group</button>
+            </div>
+
+            <!-- Send Message -->
+            <div class="section">
+                <h3>💬 Send Message</h3>
+                <div class="form-group">
+                    <label>Message Type</label>
+                    <select id="messageType">
+                        <option value="text">Text</option>
+                        <option value="image">Image</option>
+                        <option value="voice">Voice</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Message</label>
+                    <textarea id="messageText" rows="3" placeholder="Type your message..."></textarea>
+                </div>
+                <button onclick="sendMessage()">Send Message</button>
+                <button onclick="startTyping()">Start Typing</button>
+                <button onclick="stopTyping()">Stop Typing</button>
+            </div>
+
+            <!-- Online Users -->
+            <div class="section">
+                <h3>👤 Online Users</h3>
+                <div id="onlineUsers" class="online-users">
+                    <p style="color: #999;">No users online</p>
+                </div>
+            </div>
+
+            <!-- Event Log -->
+            <div class="section" style="grid-column: 1 / -1;">
+                <h3>📋 Event Log</h3>
+                <button onclick="clearLog()" style="width: auto; margin: 0 0 10px 0;">Clear Log</button>
+                <div id="eventLog" class="log">
+                    <div class="log-entry">
+                        <span class="timestamp">Ready to connect...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let socket = null;
+
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('eventLog');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            
+            const timestamp = new Date().toLocaleTimeString();
+            entry.innerHTML = `
+                <span class="timestamp">[${timestamp}]</span><br>
+                ${message}
+            `;
+            
+            logDiv.insertBefore(entry, logDiv.firstChild);
+        }
+
+        function updateStatus(connected) {
+            const statusDiv = document.getElementById('connectionStatus');
+            if (connected) {
+                statusDiv.className = 'status connected';
+                statusDiv.textContent = '✓ Connected';
+            } else {
+                statusDiv.className = 'status disconnected';
+                statusDiv.textContent = '✗ Disconnected';
+            }
+        }
+
+        function connectSocket() {
+            const url = document.getElementById('socketUrl').value;
+            const userId = document.getElementById('userId').value;
+            const userName = document.getElementById('userName').value;
+
+            if (socket && socket.connected) {
+                log('Already connected!', 'error');
+                return;
+            }
+
+            log(`Connecting to ${url}...`, 'info');
+            socket = io(url);
+
+            socket.on('connect', () => {
+                log(`✓ Connected with socket ID: ${socket.id}`, 'success');
+                updateStatus(true);
+                
+                // Join as user
+                socket.emit('user:join', {
+                    userId: parseInt(userId),
+                    userName: userName
+                });
+                log(`Joined as ${userName} (ID: ${userId})`, 'success');
+            });
+
+            socket.on('disconnect', () => {
+                log('✗ Disconnected from server', 'error');
+                updateStatus(false);
+            });
+
+            socket.on('users:online', (users) => {
+                log(`Online users updated: ${users.length} user(s)`, 'info');
+                updateOnlineUsers(users);
+            });
+
+            socket.on('message:received', (data) => {
+                log(`📨 Message received: ${JSON.stringify(data, null, 2)}`, 'success');
+            });
+
+            socket.on('group:user-joined', (data) => {
+                log(`👋 ${data.userName} joined group ${data.groupId}`, 'info');
+            });
+
+            socket.on('group:user-left', (data) => {
+                log(`👋 ${data.userName} left group ${data.groupId}`, 'info');
+            });
+
+            socket.on('typing:user', (data) => {
+                const status = data.isTyping ? 'is typing...' : 'stopped typing';
+                log(`✏️ ${data.userName} ${status}`, 'info');
+            });
+
+            socket.on('message:status', (data) => {
+                log(`📬 Message status: ${data.status} (Message ID: ${data.messageId})`, 'info');
+            });
+
+            socket.on('message:deleted', (data) => {
+                log(`🗑️ Message deleted: ${data.messageId}`, 'info');
+            });
+
+            socket.on('error', (error) => {
+                log(`❌ Error: ${error}`, 'error');
+            });
+        }
+
+        function disconnectSocket() {
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+                log('Disconnected manually', 'info');
+                updateStatus(false);
+            }
+        }
+
+        function joinGroup() {
+            if (!socket || !socket.connected) {
+                log('❌ Not connected to server!', 'error');
+                return;
+            }
+
+            const groupId = parseInt(document.getElementById('groupId').value);
+            const userId = parseInt(document.getElementById('userId').value);
+            const userName = document.getElementById('userName').value;
+
+            socket.emit('group:join', {
+                groupId: groupId,
+                userId: userId,
+                userName: userName
+            });
+
+            log(`Joining group ${groupId}...`, 'success');
+        }
+
+        function leaveGroup() {
+            if (!socket || !socket.connected) {
+                log('❌ Not connected to server!', 'error');
+                return;
+            }
+
+            const groupId = parseInt(document.getElementById('groupId').value);
+            const userId = parseInt(document.getElementById('userId').value);
+            const userName = document.getElementById('userName').value;
+
+            socket.emit('group:leave', {
+                groupId: groupId,
+                userId: userId,
+                userName: userName
+            });
+
+            log(`Leaving group ${groupId}...`, 'info');
+        }
+
+        function sendMessage() {
+            if (!socket || !socket.connected) {
+                log('❌ Not connected to server!', 'error');
+                return;
+            }
+
+            const groupId = parseInt(document.getElementById('groupId').value);
+            const userId = parseInt(document.getElementById('userId').value);
+            const userName = document.getElementById('userName').value;
+            const messageType = document.getElementById('messageType').value;
+            const message = document.getElementById('messageText').value;
+
+            if (!message && messageType === 'text') {
+                log('❌ Please enter a message!', 'error');
+                return;
+            }
+
+            socket.emit('message:send', {
+                groupId: groupId,
+                userId: userId,
+                userName: userName,
+                messageType: messageType,
+                message: message
+            });
+
+            log(`📤 Sending ${messageType} message to group ${groupId}`, 'success');
+            document.getElementById('messageText').value = '';
+        }
+
+        function startTyping() {
+            if (!socket || !socket.connected) {
+                log('❌ Not connected to server!', 'error');
+                return;
+            }
+
+            const groupId = parseInt(document.getElementById('groupId').value);
+            const userId = parseInt(document.getElementById('userId').value);
+            const userName = document.getElementById('userName').value;
+
+            socket.emit('typing:start', {
+                groupId: groupId,
+                userId: userId,
+                userName: userName
+            });
+
+            log('✏️ Started typing...', 'info');
+        }
+
+        function stopTyping() {
+            if (!socket || !socket.connected) {
+                log('❌ Not connected to server!', 'error');
+                return;
+            }
+
+            const groupId = parseInt(document.getElementById('groupId').value);
+            const userId = parseInt(document.getElementById('userId').value);
+            const userName = document.getElementById('userName').value;
+
+            socket.emit('typing:stop', {
+                groupId: groupId,
+                userId: userId,
+                userName: userName
+            });
+
+            log('✏️ Stopped typing', 'info');
+        }
+
+        function updateOnlineUsers(users) {
+            const container = document.getElementById('onlineUsers');
+            if (users.length === 0) {
+                container.innerHTML = '<p style="color: #999;">No users online</p>';
+                return;
+            }
+
+            container.innerHTML = users.map(user => 
+                `<div class="user-badge">👤 ${user.userName} (ID: ${user.userId})</div>`
+            ).join('');
+        }
+
+        function clearLog() {
+            document.getElementById('eventLog').innerHTML = '';
+            log('Log cleared', 'info');
+        }
+
+        // Allow Enter key to send message
+        document.getElementById('messageText').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html>

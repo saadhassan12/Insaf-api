@@ -1,0 +1,547 @@
+{
+  "info": {
+    "name": "Lawyer Chat System API",
+    "description": "Complete API collection for testing the lawyer group chat system with Socket.IO",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000/api",
+      "type": "string"
+    },
+    {
+      "key": "socket_url",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "YOUR_ACCESS_TOKEN_HERE",
+      "type": "string"
+    },
+    {
+      "key": "group_id",
+      "value": "1",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Chat - Get All Lawyers",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/chat/lawyers?search=",
+          "host": ["{{base_url}}"],
+          "path": ["chat", "lawyers"],
+          "query": [
+            {
+              "key": "search",
+              "value": ""
+            }
+          ]
+        },
+        "description": "Get list of all lawyers that can be added to groups"
+      }
+    },
+    {
+      "name": "Chat - Create Group",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "name",
+              "value": "Legal Team Alpha",
+              "type": "text"
+            },
+            {
+              "key": "description",
+              "value": "Team for handling corporate cases",
+              "type": "text"
+            },
+            {
+              "key": "group_image",
+              "type": "file",
+              "src": []
+            },
+            {
+              "key": "member_ids[0]",
+              "value": "2",
+              "type": "text"
+            },
+            {
+              "key": "member_ids[1]",
+              "value": "3",
+              "type": "text"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/chat/groups/create",
+          "host": ["{{base_url}}"],
+          "path": ["chat", "groups", "create"]
+        },
+        "description": "Create a new chat group (only lawyers)"
+      }
+    },
+    {
+      "name": "Chat - Get All Groups",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/chat/groups",
+          "host": ["{{base_url}}"],
+          "path": ["chat", "groups"]
+        },
+        "description": "Get all groups where user is a member"
+      }
+    },
+    {
+      "name": "Chat - Get Group Details",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/chat/groups/{{group_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["chat", "groups", "{{group_id}}"]
+        },
+        "description": "Get detailed information about a specific group"
+      }
+    },
+    {
+      "name": "Chat - Update Group",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "_method",
+              "value": "PUT",
+              "type": "text"
+            },
+            {
+              "key": "name",
+              "value": "Updated Group Name",
+              "type": "text"
+            },
+            {
+              "key": "description",
+              "value": "Updated description",
+              "type": "text"
+            },
+            {
+              "key": "group_image",
+              "type": "file",
+              "src": []
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/chat/groups/{{group_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["chat", "groups", "{{group_id}}"]
+        },
+        "description": "Update group details (admin only)"
+      }
+    },
+    {
+      "name": "Chat - Delete Group",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/chat/groups/{{group_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["chat", "groups", "{{group_id}}"]
+        },
+        "description": "Delete a group (creator only)"
+      }
+    },
+    {
+      "name": "Chat - Add Members to Group",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"member_ids\": [4, 5, 6]\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/chat/groups/{{group_id}}/add-members",
+          "host": ["{{base_url}}"],
+          "path": ["chat", "groups", "{{group_id}}", "add-members"]
+        },
+        "description": "Add new members to group (admin only)"
+      }
+    },
+    {
+      "name": "Chat - Remove Member from Group",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/chat/groups/{{group_id}}/remove-member/5",
+          "host": ["{{base_url}}"],
+          "path": ["chat", "groups", "{{group_id}}", "remove-member", "5"]
+        },
+        "description": "Remove a member from group (admin only)"
+      }
+    },
+    {
+      "name": "Chat - Leave Group",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/chat/groups/{{group_id}}/leave",
+          "host": ["{{base_url}}"],
+          "path": ["chat", "groups", "{{group_id}}", "leave"]
+        },
+        "description": "Leave a group"
+      }
+    },
+    {
+      "name": "Chat - Send Text Message",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "message_type",
+              "value": "text",
+              "type": "text"
+            },
+            {
+              "key": "message",
+              "value": "Hello everyone! This is a test message.",
+              "type": "text"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/chat/groups/{{group_id}}/messages",
+          "host": ["{{base_url}}"],
+          "path": ["chat", "groups", "{{group_id}}", "messages"]
+        },
+        "description": "Send a text message to group"
+      }
+    },
+    {
+      "name": "Chat - Send Image Message",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "message_type",
+              "value": "image",
+              "type": "text"
+            },
+            {
+              "key": "message",
+              "value": "Check out this image!",
+              "type": "text"
+            },
+            {
+              "key": "file",
+              "type": "file",
+              "src": []
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/chat/groups/{{group_id}}/messages",
+          "host": ["{{base_url}}"],
+          "path": ["chat", "groups", "{{group_id}}", "messages"]
+        },
+        "description": "Send an image message to group"
+      }
+    },
+    {
+      "name": "Chat - Send Voice Message",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "message_type",
+              "value": "voice",
+              "type": "text"
+            },
+            {
+              "key": "file",
+              "type": "file",
+              "src": []
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/chat/groups/{{group_id}}/messages",
+          "host": ["{{base_url}}"],
+          "path": ["chat", "groups", "{{group_id}}", "messages"]
+        },
+        "description": "Send a voice message to group"
+      }
+    },
+    {
+      "name": "Chat - Get Messages",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/chat/groups/{{group_id}}/messages?per_page=20&page=1",
+          "host": ["{{base_url}}"],
+          "path": ["chat", "groups", "{{group_id}}", "messages"],
+          "query": [
+            {
+              "key": "per_page",
+              "value": "20"
+            },
+            {
+              "key": "page",
+              "value": "1"
+            }
+          ]
+        },
+        "description": "Get messages for a group (paginated)"
+      }
+    },
+    {
+      "name": "Chat - Delete Message",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/chat/messages/1",
+          "host": ["{{base_url}}"],
+          "path": ["chat", "messages", "1"]
+        },
+        "description": "Delete a message"
+      }
+    },
+    {
+      "name": "Chat - Mark Messages as Read",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/chat/groups/{{group_id}}/mark-read",
+          "host": ["{{base_url}}"],
+          "path": ["chat", "groups", "{{group_id}}", "mark-read"]
+        },
+        "description": "Mark all messages in group as read"
+      }
+    },
+    {
+      "name": "Socket.IO - Server Status",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{socket_url}}/",
+          "host": ["{{socket_url}}"],
+          "path": [""]
+        },
+        "description": "Check if Socket.IO server is running"
+      }
+    },
+    {
+      "name": "Socket.IO - Get Online Users",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{socket_url}}/online-users",
+          "host": ["{{socket_url}}"],
+          "path": ["online-users"]
+        },
+        "description": "Get list of currently online users"
+      }
+    }
+  ]
+}
