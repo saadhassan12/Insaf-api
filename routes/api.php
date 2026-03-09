@@ -130,6 +130,7 @@ Route::controller(ChatController::class)->middleware(['auth:api'])->group(functi
         
         // Lawyers List
         Route::get('/lawyers', 'getLawyers')->name('chat.lawyers');
+        Route::get('/lawyers/ids', 'getLawyersWithIds')->name('chat.lawyers.ids'); // Helper endpoint
     });
 });
 

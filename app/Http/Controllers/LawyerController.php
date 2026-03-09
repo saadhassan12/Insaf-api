@@ -683,18 +683,59 @@ public function updateProceedingByCaseId(Request $request, $id)
                 'case_id' => 'required|exists:lawyercases,id',
                 'note' => 'required|string',
             ]);
-        
+
             $validated['user_id'] = auth()->id();
             $closeCase = CloseCase::create($validated);
             LawyerCase::where('id', $validated['case_id'])->update(['close_status' => 1]);
-        
+
             // Load relations
             $closeCase->load(['lawyerCase', 'user']);
-        
+
+            // ── Firebase notification ────────────────────────────────────────
+            $firebaseResponse = null;
+            $case             = LawyerCase::find($validated['case_id']);
+            $notifyUser       = auth()->user(); // notify the lawyer who closed it
+
+            if ($notifyUser && $notifyUser->device_token) {
+                try {
+                    $notification = new FirebasePushNotification(
+                        'Case Closed',
+                        'Case #' . $case->case_number . ' has been closed successfully.',
+                        $notifyUser->device_token
+                    );
+                    $firebaseResponse = $notification->toFirebase();
+                } catch (\Exception $e) {
+                    \Log::error('Firebase notification failed (closecase): ' . $e->getMessage());
+                    $firebaseResponse = 'Notification failed';
+                }
+            }
+
+            // Also notify all team members who have access to this case
+            $teamMemberIds = \App\Models\TeamCaseAccess::where('lawyer_case_id', $validated['case_id'])
+                ->pluck('user_id')
+                ->unique();
+
+            foreach ($teamMemberIds as $memberId) {
+                $member = User::find($memberId);
+                if ($member && $member->device_token && $member->id !== $notifyUser->id) {
+                    try {
+                        $notification = new FirebasePushNotification(
+                            'Case Closed',
+                            'Case #' . $case->case_number . ' has been closed.',
+                            $member->device_token
+                        );
+                        $notification->toFirebase();
+                    } catch (\Exception $e) {
+                        \Log::error("FCM failed for team member ID {$member->id}: " . $e->getMessage());
+                    }
+                }
+            }
+
             return response()->json([
-                'message' => 'Case closed successfully.',
-                'status' => 200,
-                'data' => $closeCase
+                'message'           => 'Case closed successfully.',
+                'status'            => 200,
+                'data'              => $closeCase,
+                'firebase_response' => $firebaseResponse,
             ], 201);
         }
 
@@ -1073,7 +1114,10 @@ public function leaveTeam(Request $request, $id)
 
     // Step 1: Get team
     $team = TeamMember::findOrFail($id);
-    $teamIds = is_array(json_decode($team->team_id, true)) ? json_decode($team->team_id, true) : [];
+    // team_id is already cast to array by the model — handle both cases safely
+    $teamIds = is_array($team->team_id)
+        ? $team->team_id
+        : (is_array(json_decode($team->team_id, true)) ? json_decode($team->team_id, true) : []);
 
     $updatedTeamIds = array_filter($teamIds, function ($teamId) use ($userIdToRemove) {
         return $teamId != $userIdToRemove;
@@ -1085,7 +1129,7 @@ public function leaveTeam(Request $request, $id)
         ->delete();
 
     // Step 4: Save updated team_ids
-    $team->team_id = json_encode($updatedTeamIds);
+    $team->team_id = $updatedTeamIds;  // model cast handles serialization
     $team->save();
 
     // Step 5: If self-removal, delete related records
@@ -1148,7 +1192,10 @@ public function getteam()
     if ($memberTeams->isEmpty()) {
         $allTeams = TeamMember::all();
         $memberTeams = $allTeams->filter(function ($team) use ($authUser) {
-            $ids = json_decode($team->team_id, true);
+            // team_id is already cast to array by the model — no json_decode needed
+            $ids = is_array($team->team_id)
+                ? $team->team_id
+                : json_decode($team->team_id, true);
             return is_array($ids) && in_array($authUser->id, $ids);
         });
     }
@@ -1157,24 +1204,26 @@ public function getteam()
     $allTeams = $memberTeams->merge($adminTeams)->unique('id');
     $result = [];
     foreach ($allTeams as $team) {
-        $memberIds = json_decode($team->team_id, true);
+        // team_id is already cast to array by the model — no json_decode needed
+        $memberIds = is_array($team->team_id)
+            ? $team->team_id
+            : json_decode($team->team_id, true);
+
         $teamUsers = is_array($memberIds)
             ? User::whereIn('id', $memberIds)->get()
             : collect();
-        $role = ($team->user_id === $authUser->id) ? 'admin' : 'member';
 
         $result[] = [
-            'team_id' => (string) $team->id,
-            'user_id'=>$authUser->id,
-            'user' => User::find($team->user_id),
+            'team_id'    => (string) $team->id,
+            'user_id'    => $authUser->id,
+            'user'       => User::find($team->user_id),
             'team_users' => $teamUsers,
-         
         ];
     }
 
     return response()->json([
-        'message' => 'Teams where you are a member or admin fetched successfully.',
-        'status' => 200,
+        'message'     => 'Teams where you are a member or admin fetched successfully.',
+        'status'      => 200,
         'teamMembers' => $result,
     ]);
 }

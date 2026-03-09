@@ -5,12 +5,16 @@ namespace App\Http\Controllers;
 use App\Models\ChatGroup;
 use App\Models\ChatGroupMember;
 use App\Models\ChatMessage;
+use App\Models\LawyerCase;
+use App\Models\TeamCaseAccess;
+use App\Models\TeamMember;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class ChatController extends Controller
 {
@@ -74,19 +78,86 @@ class ChatController extends Controller
                 'joined_at' => now()
             ]);
 
-            // Add members if provided
+            // ── Step 1: Collect member IDs passed in request ────────────────
+            $requestMemberIds = collect();
             if ($request->has('member_ids') && is_array($request->member_ids)) {
-                foreach ($request->member_ids as $memberId) {
-                    // Check if user is a lawyer
-                    $member = User::find($memberId);
-                    if ($member && $member->role === 'lawyer' && $memberId != $user->id) {
-                        ChatGroupMember::create([
-                            'group_id' => $group->id,
-                            'user_id' => $memberId,
-                            'role' => 'member',
-                            'joined_at' => now()
-                        ]);
-                    }
+                $requestMemberIds = collect($request->member_ids);
+            }
+
+            // ── Step 2: Fetch existing team members of the creator ──────────
+            // teams table: user_id = creator, team_id = JSON array of member IDs
+            $existingTeamMemberIds = collect();
+            $teamRecords = TeamMember::where('user_id', $user->id)->get();
+
+            foreach ($teamRecords as $teamRecord) {
+                $teamIds = is_array($teamRecord->team_id)
+                    ? $teamRecord->team_id
+                    : json_decode($teamRecord->team_id, true);
+
+                if (is_array($teamIds)) {
+                    $existingTeamMemberIds = $existingTeamMemberIds->merge($teamIds);
+                }
+            }
+
+            // ── Step 3: Merge both — all unique member IDs to add to group ──
+            $allMemberIds = $requestMemberIds
+                ->merge($existingTeamMemberIds)
+                ->unique()
+                ->reject(fn($id) => $id == $user->id)
+                ->values();
+
+            // ── Step 4: Add everyone to the chat group ──────────────────────
+            $addedMembers = [];
+
+            foreach ($allMemberIds as $memberId) {
+                $member = User::find($memberId);
+                if (!$member || $member->role !== 'lawyer') {
+                    continue;
+                }
+
+                $alreadyAdded = ChatGroupMember::where('group_id', $group->id)
+                    ->where('user_id', $memberId)
+                    ->exists();
+
+                if (!$alreadyAdded) {
+                    ChatGroupMember::create([
+                        'group_id'  => $group->id,
+                        'user_id'   => $memberId,
+                        'role'      => 'member',
+                        'joined_at' => now()
+                    ]);
+                    $addedMembers[] = (int) $memberId;
+                }
+            }
+
+            // ── Step 5: Sync teams table ────────────────────────────────────
+            // New member IDs that are NOT already in any existing team of this creator
+            $newMembersNotInTeam = $requestMemberIds
+                ->reject(fn($id) => $existingTeamMemberIds->contains($id))
+                ->reject(fn($id) => $id == $user->id)
+                ->values();
+
+            if ($newMembersNotInTeam->isNotEmpty()) {
+                // Add new IDs into the latest existing team record, or create a fresh one
+                $latestTeam = TeamMember::where('user_id', $user->id)->latest()->first();
+
+                if ($latestTeam) {
+                    // Merge new IDs into existing team_id array
+                    $merged = collect($latestTeam->team_id)
+                        ->merge($newMembersNotInTeam)
+                        ->unique()
+                        ->values()
+                        ->toArray();
+
+                    // Update without triggering booted() to avoid duplicate TeamCaseAccess rows
+                    TeamMember::where('id', $latestTeam->id)
+                        ->update(['team_id' => json_encode($merged)]);
+                } else {
+                    // No team exists yet — create a brand new team record
+                    TeamMember::create([
+                        'user_id' => $user->id,
+                        'team_id' => json_encode($newMembersNotInTeam->toArray()),
+                    ]);
                 }
             }
 
@@ -98,9 +169,11 @@ class ChatController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Group created successfully',
-                'data' => [
-                    'group' => $group,
-                    'group_image_url' => $groupImagePath ? url('storage/' . $groupImagePath) : null
+                'data'    => [
+                    'group'                    => $group,
+                    'group_image_url'          => $groupImagePath ? url('storage/' . $groupImagePath) : null,
+                    'members_added_to_group'   => $addedMembers,
+                    'team_synced'              => $newMembersNotInTeam->values()->toArray(),
                 ]
             ], 201);
 
@@ -179,6 +252,9 @@ class ChatController extends Controller
                         'joined_at' => now()
                     ]);
                     $addedMembers[] = $member;
+
+                    // ── Sync: also add this member to the group creator's team ──
+                    $this->addToTeam((int) $group->created_by, (int) $memberId);
                 } else {
                     $alreadyMembers[] = $memberId;
                 }
@@ -252,6 +328,9 @@ class ChatController extends Controller
 
             $memberToRemove->delete();
 
+            // ── Sync: remove this member from the group creator's team ──────
+            $this->removeFromTeam((int) $group->created_by, (int) $memberId);
+
             return response()->json([
                 'success' => true,
                 'message' => 'Member removed successfully'
@@ -304,6 +383,9 @@ class ChatController extends Controller
 
             $membership->delete();
 
+            // ── Sync: remove this user from the group creator's team ────────
+            $this->removeFromTeam((int) $group->created_by, (int) $user->id);
+
             return response()->json([
                 'success' => true,
                 'message' => 'Left group successfully'
@@ -335,16 +417,61 @@ class ChatController extends Controller
             ->orderBy('updated_at', 'desc')
             ->get();
 
-            $groups = $groups->map(function ($group) {
+            $groups = $groups->map(function ($group) use ($user) {
+                $latestMessage = $group->latestMessage;
+
+                // Resolve image path so it works for both storage and public uploads
+                $groupImageUrl = null;
+                if ($group->group_image) {
+                    $path = ltrim($group->group_image, '/');
+
+                    if (Str::startsWith($path, ['http://', 'https://'])) {
+                        $groupImageUrl = $path;
+                    } elseif (Str::startsWith($path, ['storage/', 'uploads/', 'public/'])) {
+                        $groupImageUrl = url($path);
+                    } else {
+                        $groupImageUrl = url('storage/' . $path);
+                    }
+                }
+
+                // Build a short summary for the latest message
+                if ($latestMessage) {
+                    switch ($latestMessage->message_type) {
+                        case 'image':
+                            $latestMessageSummary = '📷 Photo';
+                            break;
+                        case 'voice':
+                            $latestMessageSummary = 'Voice note';
+                            break;
+                        case 'text':
+                        default:
+                            $text = trim((string) $latestMessage->message);
+                            $latestMessageSummary = $text !== '' ? Str::limit($text, 120) : 'New message';
+                            break;
+                    }
+                } else {
+                    $latestMessageSummary = $group->created_by === $user->id
+                        ? 'You created this group'
+                        : 'You were added to this group';
+                }
+
                 return [
                     'id' => $group->id,
                     'name' => $group->name,
                     'description' => $group->description,
-                    'group_image' => $group->group_image ? url('storage/' . $group->group_image) : null,
+                    'group_image' => $groupImageUrl,
                     'status' => $group->status,
                     'created_by' => $group->creator,
                     'members_count' => $group->members_count,
-                    'latest_message' => $group->latestMessage,
+                    'latest_message' => $latestMessageSummary,
+                    'latest_message_type' => $latestMessage?->message_type,
+                    'latest_message_details' => $latestMessage ? [
+                        'id' => $latestMessage->id,
+                        'message' => $latestMessage->message,
+                        'file_url' => $latestMessage->file_url,
+                        'sender' => $latestMessage->user,
+                        'created_at' => $latestMessage->created_at,
+                    ] : null,
                     'created_at' => $group->created_at,
                     'updated_at' => $group->updated_at,
                 ];
@@ -398,19 +525,57 @@ class ChatController extends Controller
             }
 
             $groupData = [
-                'id' => $group->id,
-                'name' => $group->name,
-                'description' => $group->description,
-                'group_image' => $group->group_image ? url('storage/' . $group->group_image) : null,
-                'status' => $group->status,
-                'created_by' => $group->creator,
+                'id'            => $group->id,
+                'name'          => $group->name,
+                'description'   => $group->description,
+                'group_image'   => $group->group_image ? url('storage/' . $group->group_image) : null,
+                'status'        => $group->status,
+                'created_by'    => $group->creator,
                 'members_count' => $group->members_count,
-                'members' => $group->members->map(function ($member) {
+                'members'       => $group->members->map(function ($member) {
+                    $memberUser = $member->user;
+
+                    // ── Fetch all cases this member can see ─────────────────
+                    // 1. Cases they own
+                    $ownCaseIds = LawyerCase::where('user_id', $memberUser->id)
+                        ->pluck('id')->toArray();
+
+                    // 2. Cases they're tagged as lawyer_ids
+                    $taggedCaseIds = LawyerCase::whereRaw(
+                        'JSON_CONTAINS(lawyer_ids, ?)',
+                        [json_encode((int) $memberUser->id)]
+                    )->pluck('id')->toArray();
+
+                    // 3. Cases from TeamCaseAccess
+                    $teamCaseIds = TeamCaseAccess::where('user_id', $memberUser->id)
+                        ->pluck('lawyer_case_id')->toArray();
+
+                    $allCaseIds = array_unique(array_merge($ownCaseIds, $taggedCaseIds, $teamCaseIds));
+
+                    $cases = LawyerCase::with(['proceedings', 'attachments'])
+                        ->whereIn('id', $allCaseIds)
+                        ->get()
+                        ->map(function ($case) {
+                            return [
+                                'id'           => $case->id,
+                                'case_number'  => $case->case_number,
+                                'case_type'    => $case->case_type,
+                                'party_a'      => $case->party_a,
+                                'party_b'      => $case->party_b,
+                                'court_name'   => $case->court_name,
+                                'judge_name'   => $case->judge_name,
+                                'close_status' => $case->close_status ?? 0,
+                                'proceedings'  => $case->proceedings,
+                                'attachments'  => $case->attachments,
+                            ];
+                        });
+
                     return [
-                        'id' => $member->id,
-                        'user' => $member->user,
-                        'role' => $member->role,
+                        'id'        => $member->id,
+                        'user'      => $memberUser,
+                        'role'      => $member->role,
                         'joined_at' => $member->joined_at,
+                        'cases'     => $cases,           // ← all cases of this member
                     ];
                 }),
                 'created_at' => $group->created_at,
@@ -553,6 +718,15 @@ class ChatController extends Controller
                 if ($message->file_path) {
                     Storage::disk('public')->delete($message->file_path);
                 }
+            }
+
+            // ── Sync: remove every group member from the creator's team ─────
+            $memberIds = ChatGroupMember::where('group_id', $groupId)
+                ->where('user_id', '!=', $user->id)  // skip creator himself
+                ->pluck('user_id');
+
+            foreach ($memberIds as $memberId) {
+                $this->removeFromTeam((int) $user->id, (int) $memberId);
             }
 
             $group->delete();
@@ -823,4 +997,137 @@ class ChatController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Get all lawyers with their actual IDs (Helper endpoint)
+     * GET /api/chat/lawyers/ids
+     */
+    public function getLawyersWithIds()
+    {
+        try {
+            $user = Auth::user();
+
+            $lawyers = User::where('role', 'lawyer')
+                ->where('id', '!=', $user->id)
+                ->select('id', 'first_name', 'last_name', 'mobile_number', 'license_no')
+                ->orderBy('first_name')
+                ->get();
+
+            // Create a simple list for easy copying
+            $simpleList = $lawyers->map(function ($lawyer) {
+                return [
+                    'id' => $lawyer->id,
+                    'name' => $lawyer->first_name . ' ' . $lawyer->last_name,
+                    'mobile' => $lawyer->mobile_number
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Lawyers retrieved successfully',
+                'total_count' => $lawyers->count(),
+                'data' => $lawyers,
+                'simple_list' => $simpleList,
+                'example_member_ids' => $lawyers->take(3)->pluck('id')->toArray()
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve lawyers',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  PRIVATE HELPERS
+    // ═══════════════════════════════════════════════════════════════════
+
+    /**
+     * Remove a user from the creator's team record (teams table).
+     * Also cleans up TeamCaseAccess rows for that user.
+     *
+     * @param int $creatorId  – the group creator / team owner
+     * @param int $memberIdToRemove
+     */
+    private function removeFromTeam(int $creatorId, int $memberIdToRemove): void
+    {
+        $teamRecords = TeamMember::where('user_id', $creatorId)->get();
+
+        foreach ($teamRecords as $teamRecord) {
+            $ids = is_array($teamRecord->team_id)
+                ? $teamRecord->team_id
+                : json_decode($teamRecord->team_id, true);
+
+            if (!is_array($ids) || !in_array($memberIdToRemove, $ids)) {
+                continue;
+            }
+
+            // Remove the member from the array
+            $updated = array_values(array_filter($ids, fn($id) => $id != $memberIdToRemove));
+
+            // Remove TeamCaseAccess rows for this user + team record
+            TeamCaseAccess::where('team_member_id', $teamRecord->id)
+                ->where('user_id', $memberIdToRemove)
+                ->delete();
+
+            if (empty($updated)) {
+                // No members left → delete the whole team row
+                $teamRecord->delete();
+            } else {
+                TeamMember::where('id', $teamRecord->id)
+                    ->update(['team_id' => json_encode($updated)]);
+            }
+        }
+    }
+
+    /**
+     * Add a user into the creator's latest team record (teams table).
+     * If no team record exists yet, create one.
+     * Also creates TeamCaseAccess rows so the new member can see creator's cases.
+     *
+     * @param int $creatorId
+     * @param int $memberIdToAdd
+     */
+    private function addToTeam(int $creatorId, int $memberIdToAdd): void
+    {
+        $latestTeam = TeamMember::where('user_id', $creatorId)->latest()->first();
+
+        if ($latestTeam) {
+            $ids = is_array($latestTeam->team_id)
+                ? $latestTeam->team_id
+                : json_decode($latestTeam->team_id, true);
+
+            if (!in_array($memberIdToAdd, (array) $ids)) {
+                $ids[] = $memberIdToAdd;
+                TeamMember::where('id', $latestTeam->id)
+                    ->update(['team_id' => json_encode(array_values($ids))]);
+
+                // ── Grant access to all creator's cases for this new member ──
+                $cases = LawyerCase::where('user_id', $creatorId)->get();
+                foreach ($cases as $case) {
+                    $exists = TeamCaseAccess::where('team_member_id', $latestTeam->id)
+                        ->where('user_id', $memberIdToAdd)
+                        ->where('lawyer_case_id', $case->id)
+                        ->exists();
+
+                    if (!$exists) {
+                        TeamCaseAccess::create([
+                            'team_member_id' => $latestTeam->id,
+                            'user_id'        => $memberIdToAdd,
+                            'lawyer_case_id' => $case->id,
+                        ]);
+                    }
+                }
+            }
+        } else {
+            // No team exists yet — TeamMember::booted() will create TeamCaseAccess automatically
+            TeamMember::create([
+                'user_id' => $creatorId,
+                'team_id' => json_encode([$memberIdToAdd]),
+            ]);
+        }
+    }
+
 }

@@ -63,7 +63,9 @@ class LawyerCase extends Model
             $teams = TeamMember::where('user_id', $creatorId)->get();
 
             foreach ($teams as $team) {
-                $memberIds = json_decode($team->team_id, true);
+                $memberIds = is_array($team->team_id)
+                    ? $team->team_id
+                    : json_decode($team->team_id, true);
 
                 if (!is_array($memberIds)) continue;
 

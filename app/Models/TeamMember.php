@@ -33,30 +33,39 @@ class TeamMember extends Model
     }
     
     protected static function booted()
-{
-    static::created(function ($team) {
-        $creatorId = $team->user_id;
+    {
+        static::created(function ($team) {
+            $creatorId = $team->user_id;
 
-        // ✅ Decode team_id (JSON string) to array
-        $memberIds = json_decode($team->team_id, true);
+            // team_id is already cast to array by the model — handle both safely
+            $memberIds = is_array($team->team_id)
+                ? $team->team_id
+                : json_decode($team->team_id, true);
 
-        if (!is_array($memberIds)) {
-            return; // handle error if needed
-        }
-
-        // Get all cases created by the creator
-        $cases = LawyerCase::where('user_id', $creatorId)->get();
-
-        foreach ($memberIds as $memberId) {
-            foreach ($cases as $case) {
-                TeamCaseAccess::create([
-                    'team_member_id' => $team->id,
-                    'user_id' => $memberId,
-                    'lawyer_case_id' => $case->id,
-                ]);
+            if (!is_array($memberIds)) {
+                return;
             }
-        }
-    });
-}
 
+            // Get all cases created by the creator
+            $cases = LawyerCase::where('user_id', $creatorId)->get();
+
+            foreach ($memberIds as $memberId) {
+                foreach ($cases as $case) {
+                    // Avoid duplicate entries
+                    $exists = TeamCaseAccess::where('team_member_id', $team->id)
+                        ->where('user_id', $memberId)
+                        ->where('lawyer_case_id', $case->id)
+                        ->exists();
+
+                    if (!$exists) {
+                        TeamCaseAccess::create([
+                            'team_member_id' => $team->id,
+                            'user_id'        => $memberId,
+                            'lawyer_case_id' => $case->id,
+                        ]);
+                    }
+                }
+            }
+        });
+    }
 }
