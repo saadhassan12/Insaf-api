@@ -125,6 +125,7 @@ Route::controller(ChatController::class)->middleware(['auth:api'])->group(functi
         // Messages
         Route::post('/groups/{groupId}/messages', 'sendMessage')->name('chat.messages.send');
         Route::get('/groups/{groupId}/messages', 'getMessages')->name('chat.messages.index');
+        Route::put('/messages/{messageId}', 'editMessage')->name('chat.messages.edit');
         Route::delete('/messages/{messageId}', 'deleteMessage')->name('chat.messages.delete');
         Route::post('/groups/{groupId}/mark-read', 'markAsRead')->name('chat.messages.markRead');
         

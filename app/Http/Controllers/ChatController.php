@@ -884,6 +884,60 @@ class ChatController extends Controller
     }
 
     /**
+     * Edit a message
+     * PUT /api/chat/messages/{messageId}
+     */
+    public function editMessage(Request $request, $messageId)
+    {
+        try {
+            $user = Auth::user();
+
+            $request->validate([
+                'message' => 'required|string',
+            ]);
+
+            $message = ChatMessage::find($messageId);
+
+            if (!$message) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Message not found'
+                ], 404);
+            }
+
+            // Only the sender can edit their own message
+            if ($message->user_id != $user->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You can only edit your own messages'
+                ], 403);
+            }
+
+            $message->message = $request->message;
+            $message->save();
+
+            return response()->json([
+                'success'  => true,
+                'message'  => 'Message updated successfully',
+                'data'     => [
+                    'id'        => $message->id,
+                    'group_id'  => $message->group_id,
+                    'user_id'   => $message->user_id,
+                    'message'   => $message->message,
+                    'file_url'  => $message->file_url,
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to edit message',
+                'error'   => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Delete a message
      * DELETE /api/chat/messages/{messageId}
      */

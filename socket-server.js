@@ -121,9 +121,13 @@ io.on('connection', (socket) => {
             userName,
             messageType,
             file_url,
+            fileUrl,
             id,
             messageId
         } = data;
+
+        // Accept both file_url and fileUrl (Flutter may send either)
+        const resolvedFileUrl = file_url || fileUrl || null;
 
         const messageData = {
             id: id || messageId || Date.now(),
@@ -132,7 +136,7 @@ io.on('connection', (socket) => {
             userName,
             messageType: messageType || 'text',
             message: message || null,
-            file_url: file_url || null,
+            file_url: resolvedFileUrl,
             timestamp: new Date().toISOString(),
             isRead: false
         };
@@ -190,14 +194,35 @@ io.on('connection', (socket) => {
         });
     });
 
+    // Edit message
+    socket.on('message:edit', (data) => {
+        const { messageId, groupId, userId, message } = data;
+
+        // Broadcast updated message to everyone EXCEPT sender
+        // (sender already updated locally)
+        socket.to(`group_${groupId}`).emit('message:updated', {
+            messageId,
+            groupId,
+            userId,
+            message
+        });
+
+        console.log(`Message ${messageId} edited in group ${groupId} by user ${userId}`);
+    });
+
     // Delete message
     socket.on('message:delete', (data) => {
-        const { messageId, groupId } = data;
-        
+        const { messageId, groupId, userId } = data;
+
+        // Emit to ALL in group including sender so everyone removes it
         io.to(`group_${groupId}`).emit('message:deleted', {
-            messageId,
-            groupId
+            messageId,   // same key Flutter uses to match & remove message
+            groupId,
+            userId,
+            deleted_message_id: messageId  // extra key for safety
         });
+
+        console.log(`Message ${messageId} deleted in group ${groupId} by user ${userId}`);
     });
 
     // Group updated
