@@ -114,25 +114,34 @@ io.on('connection', (socket) => {
 
     // Send message to group
     socket.on('message:send', (data) => {
-        const { groupId, message, userId, userName, messageType, fileUrl, fileName } = data;
-        
-        const messageData = {
-            id: Date.now(), // Temporary ID, should be from database
+        const {
             groupId,
+            message,
             userId,
             userName,
             messageType,
+            file_url,
+            id,
+            messageId
+        } = data;
+
+        const messageData = {
+            id: id || messageId || Date.now(),
+            groupId,
+            userId,
+            userName,
+            messageType: messageType || 'text',
             message: message || null,
-            fileUrl: fileUrl || null,
-            fileName: fileName || null,
+            file_url: file_url || null,
             timestamp: new Date().toISOString(),
             isRead: false
         };
-        
-        // Broadcast message to all users in the group including sender
-        io.to(`group_${groupId}`).emit('message:received', messageData);
-        
-        console.log(`Message sent to group ${groupId} by ${userName}`);
+
+        // Broadcast message to all users in the group EXCEPT the sender
+        // (sender already shows the message locally — no double message)
+        socket.to(`group_${groupId}`).emit('message:received', messageData);
+
+        console.log(`Message sent to group ${groupId} by ${userName} | type: ${messageData.messageType} | file_url: ${file_url ?? 'none'}`);
     });
 
     // User is typing
