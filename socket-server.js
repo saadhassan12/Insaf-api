@@ -141,11 +141,36 @@ io.on('connection', (socket) => {
             isRead: false
         };
 
-        // Broadcast message to all users in the group EXCEPT the sender
-        // (sender already shows the message locally — no double message)
-        socket.to(`group_${groupId}`).emit('message:received', messageData);
-
+        // Broadcast to ALL users in the group including sender
+        io.to(`group_${groupId}`).emit('message:received', messageData);
         console.log(`Message sent to group ${groupId} by ${userName} | type: ${messageData.messageType} | file_url: ${file_url ?? 'none'}`);
+    });
+
+    // Update (edit) message — same pattern as message:send
+    socket.on('message:update', (data) => {
+        const {
+            groupId,
+            messageId,
+            id,
+            userId,
+            userName,
+            message
+        } = data;
+
+        const updatedData = {
+            id: id || messageId,
+            messageId: id || messageId,
+            groupId,
+            userId,
+            userName,
+            message: message || null,
+            timestamp: new Date().toISOString()
+        };
+
+        // Broadcast to all EXCEPT sender (sender already updated locally)
+        socket.to(`group_${groupId}`).emit('message:updated', updatedData);
+
+        console.log(`Message updated in group ${groupId} by ${userName} | messageId: ${updatedData.messageId}`);
     });
 
     // User is typing
@@ -192,22 +217,6 @@ io.on('connection', (socket) => {
             status: 'read',
             userId
         });
-    });
-
-    // Edit message
-    socket.on('message:edit', (data) => {
-        const { messageId, groupId, userId, message } = data;
-
-        // Broadcast updated message to everyone EXCEPT sender
-        // (sender already updated locally)
-        socket.to(`group_${groupId}`).emit('message:updated', {
-            messageId,
-            groupId,
-            userId,
-            message
-        });
-
-        console.log(`Message ${messageId} edited in group ${groupId} by user ${userId}`);
     });
 
     // Delete message
@@ -272,6 +281,106 @@ io.on('connection', (socket) => {
     // Error handling
     socket.on('error', (error) => {
         console.error('Socket error:', error);
+    });
+
+    // ════════════════════════════════════════════════════════════════
+    //  DIRECT CHAT  —  Guest ↔ Lawyer (1-to-1 after accept)
+    //  Room name: direct_{guestId}
+    // ════════════════════════════════════════════════════════════════
+
+    // Join direct chat room
+    socket.on('direct:join', (data) => {
+        const { guestId, userId, userName } = data;
+        const room = `direct_${guestId}`;
+        socket.join(room);
+        console.log(`[Direct] ${userName} (${userId}) joined room ${room}`);
+    });
+
+    // Leave direct chat room
+    socket.on('direct:leave', (data) => {
+        const { guestId, userId, userName } = data;
+        socket.leave(`direct_${guestId}`);
+        console.log(`[Direct] ${userName} (${userId}) left room direct_${guestId}`);
+    });
+
+    // Send direct message  →  broadcast to room (including sender for confirmation)
+    socket.on('direct:message:send', (data) => {
+        const {
+            guestId,
+            senderId,
+            senderName,
+            receiverId,
+            messageType,
+            message,
+            file_url,
+            id,
+            messageId
+        } = data;
+
+        const msgData = {
+            id:          id || messageId || Date.now(),
+            guestId,
+            senderId,
+            senderName,
+            receiverId,
+            messageType: messageType || 'text',
+            message:     message  || null,
+            file_url:    file_url || null,
+            timestamp:   new Date().toISOString(),
+            isRead:      false
+        };
+
+        // Send to all in room (both guest & lawyer)
+        io.to(`direct_${guestId}`).emit('direct:message:received', msgData);
+        console.log(`[Direct] msg in direct_${guestId} from ${senderName} | type: ${msgData.messageType}`);
+    });
+
+    // Update direct message
+    socket.on('direct:message:update', (data) => {
+        const { guestId, messageId, id, senderId, senderName, message } = data;
+        const resolvedId = id || messageId;
+
+        const updatedData = {
+            id:        resolvedId,
+            messageId: resolvedId,
+            guestId,
+            senderId,
+            senderName,
+            message:   message || null,
+            timestamp: new Date().toISOString()
+        };
+
+        // Broadcast to others only (sender updated locally)
+        socket.to(`direct_${guestId}`).emit('direct:message:updated', updatedData);
+        console.log(`[Direct] msg updated in direct_${guestId} | messageId: ${resolvedId}`);
+    });
+
+    // Delete direct message
+    socket.on('direct:message:delete', (data) => {
+        const { guestId, messageId, senderId } = data;
+
+        // Broadcast to all in room including sender
+        io.to(`direct_${guestId}`).emit('direct:message:deleted', {
+            messageId,
+            guestId,
+            senderId
+        });
+        console.log(`[Direct] msg deleted in direct_${guestId} | messageId: ${messageId}`);
+    });
+
+    // Typing in direct chat
+    socket.on('direct:typing:start', (data) => {
+        const { guestId, userId, userName } = data;
+        socket.to(`direct_${guestId}`).emit('direct:typing:user', {
+            guestId, userId, userName, isTyping: true
+        });
+    });
+
+    socket.on('direct:typing:stop', (data) => {
+        const { guestId, userId, userName } = data;
+        socket.to(`direct_${guestId}`).emit('direct:typing:user', {
+            guestId, userId, userName, isTyping: false
+        });
     });
 });
 

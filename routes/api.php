@@ -4,6 +4,7 @@ use App\Http\Controllers\GuestController;
 use App\Http\Controllers\LawyerController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\ChatController;
+use App\Http\Controllers\DirectMessageController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -131,7 +132,18 @@ Route::controller(ChatController::class)->middleware(['auth:api'])->group(functi
         
         // Lawyers List
         Route::get('/lawyers', 'getLawyers')->name('chat.lawyers');
-        Route::get('/lawyers/ids', 'getLawyersWithIds')->name('chat.lawyers.ids'); // Helper endpoint
+        Route::get('/lawyers/ids', 'getLawyersWithIds')->name('chat.lawyers.ids');
+    });
+});
+
+// ── Direct Chat Routes (Guest ↔ Lawyer) ────────────────────────────────────
+Route::controller(DirectMessageController::class)->middleware(['auth:api'])->group(function () {
+    Route::prefix('direct')->group(function () {
+        Route::get('/conversations',              'getConversations');          // GET  all conversations
+        Route::get('/messages/{guestId}',         'getMessages');              // GET  messages for a guest
+        Route::post('/messages/{guestId}',        'sendMessage');              // POST send a message
+        Route::put('/messages/{messageId}',       'editMessage');              // PUT  edit a message
+        Route::delete('/messages/{messageId}',    'deleteMessage');            // DELETE delete a message
     });
 });
 
