@@ -5,6 +5,44 @@ const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const admin = require('firebase-admin');
+
+// ── Firebase Admin Init ──────────────────────────────────────────────────────
+const serviceAccountPath = path.join(__dirname, 'storage/app/firebase/insafapp-c2502-firebase-adminsdk-1ini1-a07af15cd9.json');
+if (fs.existsSync(serviceAccountPath)) {
+    admin.initializeApp({
+        credential: admin.credential.cert(serviceAccountPath),
+    });
+    console.log('[FCM] Firebase Admin initialized ✅');
+} else {
+    console.warn('[FCM] Firebase service account file NOT found — push notifications disabled');
+}
+
+/**
+ * Send Firebase push notification
+ * @param {string} deviceToken
+ * @param {string} title
+ * @param {string} body
+ * @param {object} data  — extra payload (optional)
+ */
+async function sendPushNotification(deviceToken, title, body, data = {}) {
+    if (!deviceToken || !admin.apps.length) return;
+    try {
+        await admin.messaging().send({
+            token: deviceToken,
+            notification: { title, body },
+            data: data,
+            android: { priority: 'high' },
+            apns: {
+                headers: { 'apns-priority': '10' },
+                payload: { aps: { sound: 'default' } },
+            },
+        });
+        console.log(`[FCM] Notification sent to token: ${deviceToken.substring(0, 20)}...`);
+    } catch (err) {
+        console.warn(`[FCM] Failed to send notification: ${err.message}`);
+    }
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -64,12 +102,13 @@ io.on('connection', (socket) => {
 
     // User joins - store user info
     socket.on('user:join', (data) => {
-        const { userId, userName } = data;
+        const { userId, userName, deviceToken } = data;
         
         onlineUsers.set(userId, {
             socketId: socket.id,
             userName: userName,
-            userId: userId
+            userId: userId,
+            deviceToken: deviceToken || null   // store device token
         });
         
         socket.userId = userId;
@@ -123,7 +162,9 @@ io.on('connection', (socket) => {
             file_url,
             fileUrl,
             id,
-            messageId
+            messageId,
+            groupName,           // Flutter should send group name
+            memberDeviceTokens   // Flutter should send array of {userId, deviceToken} for all members
         } = data;
 
         // Accept both file_url and fileUrl (Flutter may send either)
@@ -144,6 +185,41 @@ io.on('connection', (socket) => {
         // Broadcast to ALL users in the group including sender
         io.to(`group_${groupId}`).emit('message:received', messageData);
         console.log(`Message sent to group ${groupId} by ${userName} | type: ${messageData.messageType} | file_url: ${file_url ?? 'none'}`);
+
+        // ── Firebase Push Notifications ──────────────────────────────────
+        // Build notification text (WhatsApp style)
+        const notifTitle = groupName || 'Group Chat';
+        let notifBody;
+        if (!messageType || messageType === 'text') {
+            notifBody = `${userName}: ${message || ''}`;
+        } else if (messageType === 'image') {
+            notifBody = `${userName}: 📷 Photo`;
+        } else if (messageType === 'voice') {
+            notifBody = `${userName}: 🎤 Voice message`;
+        } else {
+            notifBody = `${userName}: 📎 File`;
+        }
+
+        // Option 1: Use device tokens sent by Flutter in the event payload
+        if (Array.isArray(memberDeviceTokens) && memberDeviceTokens.length > 0) {
+            memberDeviceTokens.forEach(({ userId: memberId, deviceToken }) => {
+                if (memberId != userId && deviceToken) {
+                    sendPushNotification(deviceToken, notifTitle, notifBody, {
+                        groupId: String(groupId),
+                        messageType: messageType || 'text',
+                        senderId: String(userId),
+                    });
+                }
+            });
+        } else {
+            // Option 2: Use device tokens stored in onlineUsers map (from user:join)
+            onlineUsers.forEach((onlineUser, onlineUserId) => {
+                if (onlineUserId != userId && onlineUser.deviceToken) {
+                    // We can't know if they're in this group from socket alone,
+                    // so we rely on Flutter passing memberDeviceTokens instead
+                }
+            });
+        }
     });
 
     // Update (edit) message — same pattern as message:send
@@ -314,7 +390,8 @@ io.on('connection', (socket) => {
             message,
             file_url,
             id,
-            messageId
+            messageId,
+            receiverDeviceToken   // Flutter should send receiver's device token
         } = data;
 
         const msgData = {
@@ -333,6 +410,33 @@ io.on('connection', (socket) => {
         // Send to all in room (both guest & lawyer)
         io.to(`direct_${guestId}`).emit('direct:message:received', msgData);
         console.log(`[Direct] msg in direct_${guestId} from ${senderName} | type: ${msgData.messageType}`);
+
+        // ── Firebase Push Notification to receiver ───────────────────────
+        let notifBody;
+        if (!messageType || messageType === 'text') {
+            notifBody = message || 'Sent a message';
+        } else if (messageType === 'image') {
+            notifBody = '📷 Photo';
+        } else if (messageType === 'voice') {
+            notifBody = '🎤 Voice message';
+        } else {
+            notifBody = '📎 File';
+        }
+
+        // Option 1: token sent directly in event
+        const tokenFromEvent = receiverDeviceToken;
+        // Option 2: token stored from user:join
+        const receiverOnline = onlineUsers.get(String(receiverId)) || onlineUsers.get(receiverId);
+        const tokenFromOnline = receiverOnline?.deviceToken;
+
+        const finalToken = tokenFromEvent || tokenFromOnline;
+        if (finalToken) {
+            sendPushNotification(finalToken, senderName, notifBody, {
+                guestId:     String(guestId),
+                messageType: messageType || 'text',
+                senderId:    String(senderId),
+            });
+        }
     });
 
     // Update direct message
