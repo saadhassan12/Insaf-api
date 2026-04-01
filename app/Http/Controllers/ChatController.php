@@ -9,6 +9,7 @@ use App\Models\LawyerCase;
 use App\Models\TeamCaseAccess;
 use App\Models\TeamMember;
 use App\Models\User;
+use App\Notifications\FirebasePushNotification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
@@ -753,9 +754,9 @@ class ChatController extends Controller
     {
         try {
             $validator = Validator::make($request->all(), [
-                'message_type' => 'required|in:text,image,voice',
+                'message_type' => 'required|in:text,image,voice,file',
                 'message' => 'required_if:message_type,text|nullable|string',
-                'file' => 'required_if:message_type,image,voice|file|max:10240', // 10MB max
+                'file' => 'required_if:message_type,image,voice,file|file|max:20480', // 20MB max
             ]);
 
             if ($validator->fails()) {
@@ -789,18 +790,27 @@ class ChatController extends Controller
             }
 
             $messageData = [
-                'group_id' => $groupId,
-                'user_id' => $user->id,
+                'group_id'     => $groupId,
+                'user_id'      => $user->id,
                 'message_type' => $request->message_type,
-                'message' => $request->message,
+                'message'      => $request->message,
             ];
 
-            // Handle file upload for image or voice
+            // Handle file upload for image, voice or file
             if ($request->hasFile('file')) {
                 $file = $request->file('file');
                 $fileName = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-                
-                $folder = $request->message_type === 'image' ? 'chat/images' : 'chat/voice';
+
+                // Determine storage folder by message_type
+                if ($request->message_type === 'image') {
+                    $folder = 'chat/images';
+                } elseif ($request->message_type === 'voice') {
+                    $folder = 'chat/voice';
+                } else {
+                    // message_type === 'file' — any document/pdf/etc
+                    $folder = 'chat/files';
+                }
+
                 $filePath = $file->storeAs($folder, $fileName, 'public');
 
                 $messageData['file_path'] = $filePath;
@@ -814,6 +824,45 @@ class ChatController extends Controller
 
             // Update group's updated_at to move it to top of chat list
             $group->touch();
+
+            // ── Firebase Push Notification to all group members (except sender) ──
+            try {
+                $senderName = trim($user->first_name . ' ' . $user->last_name);
+                $groupName  = $group->name ?? 'Group Chat';
+
+                // Notification title: "GroupName"
+                // Notification body:  "SenderName: message text"  OR  "SenderName: sent a photo/voice/file"
+                $notifTitle = $groupName;
+                if ($request->message_type === 'text') {
+                    $notifBody = $senderName . ': ' . $request->message;
+                } elseif ($request->message_type === 'image') {
+                    $notifBody = $senderName . ': 📷 Photo';
+                } elseif ($request->message_type === 'voice') {
+                    $notifBody = $senderName . ': 🎤 Voice message';
+                } else {
+                    $notifBody = $senderName . ': 📎 File';
+                }
+
+                // Get all group members except the sender
+                $members = ChatGroupMember::where('group_id', $groupId)
+                    ->where('user_id', '!=', $user->id)
+                    ->with('user')
+                    ->get();
+
+                foreach ($members as $member) {
+                    $memberUser = $member->user;
+                    if ($memberUser && $memberUser->device_token) {
+                        try {
+                            $notif = new FirebasePushNotification($notifTitle, $notifBody, $memberUser->device_token);
+                            $notif->toFirebase();
+                        } catch (\Exception $fcmEx) {
+                            \Log::warning('FCM failed for user ' . $memberUser->id . ': ' . $fcmEx->getMessage());
+                        }
+                    }
+                }
+            } catch (\Exception $notifEx) {
+                \Log::warning('Notification block failed: ' . $notifEx->getMessage());
+            }
 
             return response()->json([
                 'success' => true,
